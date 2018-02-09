@@ -1,0 +1,15 @@
+arrow==0.12.1
+certifi==2018.1.18
+chardet==3.0.4
+docker==3.0.0
+docker-pycreds==0.2.1
+idna==2.6
+Logbook==1.1.0
+pymongo==3.6.0
+python-dateutil==2.6.1
+python-slugify==1.2.4
+requests==2.18.4
+six==1.11.0
+Unidecode==1.0.22
+urllib3==1.22
+websocket-client==0.46.0
