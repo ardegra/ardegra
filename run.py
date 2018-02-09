@@ -8,8 +8,9 @@ from lib.spider.NewsSpider1 import NewsSpider1
 from lib.spider.NewsSpider2 import NewsSpider2
 
 def run():
-  spider_name = sys.argv[1]
+  spider_name = " ".join(sys.argv[1:])
   client      = pymongo.MongoClient("mongodb://{}/ardegra".format(Config.DATABASE_ADDRESS))
+  print("[ardegra] Running: {}".format(spider_name))
   try:
     db       = client["ardegra"]
     document = db.spiders.find_one({"name": spider_name})
