@@ -1,10 +1,17 @@
 import pymongo
 import requests
 
+from raven import Client
+from logbook import Logger
+
 from lib.config import Config
+from lib.exceptions import DuplicateDocumentException
 
 class NewsSpider1:
   def __init__(self, name=None, **kwargs):
+    self.raven_client          = Client()
+    self.logger                = Logger("NewsSpider1")
+    
     self.name                  = name
     self.country               = kwargs.get("country", None)
     self.xpath                 = kwargs.get("xpath", None)
@@ -25,28 +32,32 @@ class NewsSpider1:
       self.index_max_page_number = document["indexMaxPageNumber"]
       self.ignore_domain_list    = document["ignoreDomainList"]
       self.entry_date_parser     = document["entryDateParser"]
+      
+      if type(self.index_url) is str:
+        self.index_url = [self.index_url]
     except Exception as err:
-      print("[NewsSpider1] {}".format(str(err)))
+      self.raven_client().captureException()
+      self.logger.error("{}".format(str(err)))
     finally:
       client.close()
 
-  def crawl_article_url(self):
+  def crawl_article_url(self, index_url):
     article_url_list = []
     for x in range(1, (self.index_max_page_number + 1)):
-      index_url = self.index_url.format(page_number=x)
-      print("[NewsSpider1] Getting article_url from: {}".format(index_url))
+      real_index_url = index_url.format(page_number=x)
+      self.logger.debug("Getting article_url from: {}".format(real_index_url))
       
       api_url = "{}/spider/news/extract/articleUrl".format(Config.BASE_EXTRACT_API)
       r       = requests.post(api_url, json={
-        "url": index_url,
+        "url": real_index_url,
         "xpath": self.xpath
       })
       article_url_list.extend(r.json()["articleUrl"])
-      print("[NewsSpider1] Current article_url_list count: {}".format(len(article_url_list)))
+      self.logger.debug("Current article_url_list count: {}".format(len(article_url_list)))
     return article_url_list
 
   def crawl_article(self, article_url, continue_on_duplicate):
-    print("[NewsSpider1] article_url: {}".format(article_url))
+    self.logger.debug("article_url: {}".format(article_url))
     api_url = "{}/spider/news/extract/article".format(Config.BASE_EXTRACT_API)
     r       = requests.post(api_url, json={
       "url": article_url,
@@ -63,12 +74,13 @@ class NewsSpider1:
       "entryDateParser": self.entry_date_parser
     })
     
-    print("[NewsSpider1] continue_on_duplicate: {}".format(continue_on_duplicate))
+    self.logger.debug("continue_on_duplicate: {}".format(continue_on_duplicate))
+    self.logger.debug("duplicate: {}".format(r.json()["duplicate"]))
     if r.json()["duplicate"]:
       if not continue_on_duplicate:
-        raise Exception("Duplicate document!")
+        raise DuplicateDocumentException("Duplicate document!")
     else:
-      print("[NewsSpider1] Saved with id: {}".format(r.json()["insertedId"]))
+      self.logger.debug("Saved with id: {}".format(r.json()["insertedId"]))
   
   def check_duplicate(self, article_url):
     print("[NewsSpider1] Checking duplicate: {}".format(article_url))
@@ -80,12 +92,24 @@ class NewsSpider1:
 
   def run(self):
     self.prepare_data()
-    article_url_list      = self.crawl_article_url()
-    is_duplicate          = self.check_duplicate(article_url_list[-1])
-    continue_on_duplicate = False if is_duplicate else True
     
     try:
-      for article_url in article_url_list:
-        self.crawl_article(article_url, continue_on_duplicate)
+      for index_url in self.index_url:
+        self.logger.debug("index_url: {}".format(index_url))
+        article_url_list      = self.crawl_article_url(index_url)
+        is_duplicate          = self.check_duplicate(article_url_list[-1])
+        continue_on_duplicate = False if is_duplicate else True
+      
+        try:
+          for article_url in article_url_list:
+            ignored = False
+            for ignored_domain in self.ignore_domain_list:
+              if ignored_domain in article_url:
+                ignored = True
+            if not ignored:
+              self.crawl_article(article_url, continue_on_duplicate)
+        except DuplicateDocumentException as err:
+          self.logger.debug(str(err))
     except Exception as err:
-      print("[NewsSpider1] {}".format(str(err)))
+      self.raven_client.captureException()
+      self.logger.error("{}".format(str(err)))

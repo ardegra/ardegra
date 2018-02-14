@@ -1,10 +1,17 @@
 import pymongo
 import requests
 
+from raven import Client
+from logbook import Logger
+
 from lib.config import Config
+from lib.exceptions import DuplicateDocumentException
 
 class ForumSpider1:
   def __init__(self, name=None, **kwargs):
+    self.raven_client  = Client()
+    self.logger        = Logger("ForumSpider1")
+
     self.fast_test     = kwargs.get("fast_test", False)
     self.name          = name
     self.country       = kwargs.get("country", None)
@@ -21,7 +28,8 @@ class ForumSpider1:
       self.xpath         = document["xpath"]
       self.category_list = document["categoryList"]
     except Exception as err:
-      print("[ForumSpider1] {}".format(str(err)))
+      self.raven_client.captureException()
+      self.logger.error((str(err)))
     finally:
       client.close()
       
@@ -35,14 +43,14 @@ class ForumSpider1:
     
     thread_url_list = []
     while current_url is not None:
-      print("[ForumSpider1] current_url: {}".format(current_url))
+      self.logger.debug("current_url: {}".format(current_url))
       api_url = "{}/spider/forum/extract/threadUrl".format(Config.BASE_EXTRACT_API)
       r       = requests.post(api_url, json={
         "url": current_url,
         "xpath": self.xpath
       })
       thread_url_list.extend(r.json()["threadList"])
-      print("[ForumSpider1] Total Thread List: {}".format(len(thread_url_list)))
+      self.logger.debug("Total Thread List: {}".format(len(thread_url_list)))
       
       if self.fast_test:
         break
@@ -66,7 +74,7 @@ class ForumSpider1:
     if last_page_url is None:
       self.forward_crawling(thread_url)
     else:
-      print("[ForumSpider1] Getting FirstPostID: {}".format(thread_url))
+      self.logger.debug("Getting FirstPostID: {}".format(thread_url))
       api_url               = "{}/spider/forum/extract/post/firstPostId".format(Config.BASE_EXTRACT_API)
       r                     = requests.post(api_url, json={
         "url": thread_url,
@@ -81,7 +89,7 @@ class ForumSpider1:
     current_url = url
     
     while has_next:
-      print("[ForumSpider1][Forward Crawling] current_url: {}".format(current_url))
+      self.logger.debug("[Forward Crawling] current_url: {}".format(current_url))
       api_url = "{}/spider/forum/extract/post".format(Config.BASE_EXTRACT_API)
       r       = requests.post(api_url, json={
         "url": current_url,
@@ -95,9 +103,8 @@ class ForumSpider1:
           "crawlerName": self.name,
           "country": self.country
         })
-        print("[ForumSpider1][Forward Crawling] duplicate: {}\n[ForumSpider1][Forward Crawling] permalink: {}".format(
-          r.json()["duplicate"], post["permalink"]
-        ))
+        self.logger.debug("[Forward Crawling] duplicate: {}".format(r.json()["duplicate"]))
+        self.logger.debug("[Forward Crawling] permalink: {}".format(post["permalink"]))
       
       api_url     = "{}/spider/forum/extract/thread/nextPageUrl".format(Config.BASE_EXTRACT_API)
       r           = requests.post(api_url, json={
@@ -114,7 +121,7 @@ class ForumSpider1:
     can_continue = True
     
     while has_prev and can_continue:
-      print("[ForumSpider1][Backward Crawling] current_url: {}".format(current_url))
+      self.logger.debug("[Backward Crawling] current_url: {}".format(current_url))
       api_url = "{}/spider/forum/extract/post".format(Config.BASE_EXTRACT_API)
       r       = requests.post(api_url, json={
         "url": current_url,
@@ -128,17 +135,16 @@ class ForumSpider1:
           "crawlerName": self.name,
           "country": self.country
         })
-        print("[ForumSpider1][Backward Crawling] duplicate: {}\n[ForumSpider1][Backward Crawling] permalink: {}".format(
-          r.json()["duplicate"], post["permalink"]
-        ))
+        self.logger.debug("[Backward Crawling] duplicate: {}".format(r.json()["duplicate"]))
+        self.logger.debug("[Backward Crawling] permalink: {}".format(post["permalink"]))
         
-        print("[ForumSpider1][Backward Crawling] continue_on_duplicate: {}".format(continue_on_duplicate))
+        self.logger.debug("[Backward Crawling] continue_on_duplicate: {}".format(continue_on_duplicate))
         if r.json()["duplicate"] and not continue_on_duplicate:
-          print("[ForumSpider1][Backward Crawling] Breaking! because of duplicate")
+          self.logger.debug("[Backward Crawling] Breaking! because of duplicate")
           can_continue = False
           break
 
-      print("[ForumSpider1][Backward Crawling] Getting prevPageUrl of: {}".format(current_url))
+      self.logger.debug("[Backward Crawling] Getting prevPageUrl of: {}".format(current_url))
       api_url     = "{}/spider/forum/extract/thread/prevPageUrl".format(Config.BASE_EXTRACT_API)
       r           = requests.post(api_url, json={
         "url": current_url,

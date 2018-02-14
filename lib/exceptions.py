@@ -1,0 +1,2 @@
+class DuplicateDocumentException(Exception):
+  pass
